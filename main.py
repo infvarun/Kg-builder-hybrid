@@ -35,19 +35,29 @@ def main():
     
     # Sidebar navigation
     st.sidebar.title("Navigation")
-    page = st.sidebar.radio(
-        "Select Page",
-        ["Upload Documents", "Admin Dashboard", "Search Documents"]
-    )
+    
+    # Initialize session state for page if not exists
+    if 'current_page' not in st.session_state:
+        st.session_state.current_page = "Upload Documents"
+    
+    # Navigation buttons
+    if st.sidebar.button("📄 Upload Documents", use_container_width=True):
+        st.session_state.current_page = "Upload Documents"
+    
+    if st.sidebar.button("🏗️ Admin Dashboard", use_container_width=True):
+        st.session_state.current_page = "Admin Dashboard"
+    
+    if st.sidebar.button("🔍 Search Documents", use_container_width=True):
+        st.session_state.current_page = "Search Documents"
     
     # Page routing
-    if page == "Upload Documents":
+    if st.session_state.current_page == "Upload Documents":
         upload_interface = UploadInterface()
         upload_interface.render()
-    elif page == "Admin Dashboard":
+    elif st.session_state.current_page == "Admin Dashboard":
         admin_dashboard = AdminDashboard()
         admin_dashboard.render()
-    elif page == "Search Documents":
+    elif st.session_state.current_page == "Search Documents":
         search_interface = SearchInterface()
         search_interface.render()
 
