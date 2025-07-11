@@ -5,6 +5,14 @@ description = ""
 authors = ["Your Name <you@example.com>"]
 requires-python = ">=3.11"
 dependencies = [
+    "langchain-core>=0.3.68",
+    "neo4j>=5.28.1",
+    "numpy>=2.3.1",
+    "openai>=1.95.0",
+    "pandas>=2.3.1",
+    "pdfplumber>=0.11.7",
+    "pypdf2>=3.0.1",
+    "scikit-learn>=1.7.0",
     "streamlit>=1.46.1",
 ]
 

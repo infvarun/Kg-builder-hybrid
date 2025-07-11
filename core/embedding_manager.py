@@ -1,157 +1,158 @@
 
-import os
-import logging
-from typing import List, Dict, Any, Optional
 import numpy as np
-from sentence_transformers import SentenceTransformer
-import json
+from typing import List, Dict, Any
+import logging
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 import pickle
+import os
 
 class EmbeddingManager:
-    """Manages document embeddings for semantic search."""
+    """Manages document embeddings using TF-IDF vectorization."""
     
-    def __init__(self, model_name: str = 'all-MiniLM-L6-v2'):
+    def __init__(self):
         self.logger = logging.getLogger(__name__)
-        self.model_name = model_name
+        self.vectorizer = TfidfVectorizer(
+            max_features=1000,
+            stop_words='english',
+            ngram_range=(1, 2),
+            max_df=0.95,
+            min_df=2
+        )
+        self.embeddings_cache = {}
+        self.fitted = False
         
-        # Initialize sentence transformer model
+    def generate_embeddings(self, texts: List[str]) -> np.ndarray:
+        """Generate TF-IDF embeddings for a list of texts."""
         try:
-            self.model = SentenceTransformer(model_name)
-            self.logger.info(f"Loaded embedding model: {model_name}")
-        except Exception as e:
-            self.logger.error(f"Failed to load embedding model: {str(e)}")
-            raise
-        
-        # Embedding cache
-        self.embedding_cache = {}
-    
-    def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """Generate embeddings for a list of texts."""
-        try:
-            embeddings = self.model.encode(texts, convert_to_numpy=True)
-            return embeddings.tolist()
+            if not self.fitted:
+                # Fit the vectorizer on the texts
+                embeddings = self.vectorizer.fit_transform(texts)
+                self.fitted = True
+            else:
+                # Transform using the already fitted vectorizer
+                embeddings = self.vectorizer.transform(texts)
+            
+            return embeddings.toarray()
+            
         except Exception as e:
             self.logger.error(f"Error generating embeddings: {str(e)}")
             raise
     
-    def generate_single_embedding(self, text: str) -> List[float]:
+    def generate_single_embedding(self, text: str) -> np.ndarray:
         """Generate embedding for a single text."""
-        return self.generate_embeddings([text])[0]
-    
-    def add_chunks_embeddings(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Add embeddings to chunks."""
-        texts = [chunk['content'] for chunk in chunks]
-        embeddings = self.generate_embeddings(texts)
+        if not self.fitted:
+            # If not fitted, fit on this single text (not ideal but works)
+            embedding = self.vectorizer.fit_transform([text])
+            self.fitted = True
+        else:
+            embedding = self.vectorizer.transform([text])
         
-        for i, chunk in enumerate(chunks):
-            chunk['embedding'] = embeddings[i]
-            chunk['embedding_model'] = self.model_name
-        
-        return chunks
+        return embedding.toarray()[0]
     
-    def semantic_search(self, query: str, chunks: List[Dict[str, Any]], top_k: int = 5) -> List[Dict[str, Any]]:
-        """Perform semantic search on chunks."""
+    def calculate_similarity(self, embedding1: np.ndarray, embedding2: np.ndarray) -> float:
+        """Calculate cosine similarity between two embeddings."""
         try:
-            # Generate query embedding
+            similarity = cosine_similarity([embedding1], [embedding2])[0][0]
+            return float(similarity)
+        except Exception as e:
+            self.logger.error(f"Error calculating similarity: {str(e)}")
+            return 0.0
+    
+    def find_similar_chunks(self, query_embedding: np.ndarray, 
+                           chunk_embeddings: List[np.ndarray], 
+                           top_k: int = 5) -> List[Dict[str, Any]]:
+        """Find most similar chunks to a query embedding."""
+        try:
+            similarities = []
+            
+            for idx, chunk_embedding in enumerate(chunk_embeddings):
+                similarity = self.calculate_similarity(query_embedding, chunk_embedding)
+                similarities.append({
+                    'chunk_index': idx,
+                    'similarity_score': similarity
+                })
+            
+            # Sort by similarity score in descending order
+            similarities.sort(key=lambda x: x['similarity_score'], reverse=True)
+            
+            return similarities[:top_k]
+            
+        except Exception as e:
+            self.logger.error(f"Error finding similar chunks: {str(e)}")
+            return []
+    
+    def semantic_search(self, query: str, documents: List[Dict[str, Any]], 
+                       top_k: int = 5) -> List[Dict[str, Any]]:
+        """Perform semantic search on documents."""
+        try:
+            # Extract text content from documents
+            doc_texts = [doc.get('content', '') for doc in documents]
+            
+            # Generate embeddings for all documents
+            doc_embeddings = self.generate_embeddings(doc_texts)
+            
+            # Generate embedding for query
             query_embedding = self.generate_single_embedding(query)
             
             # Calculate similarities
             similarities = []
-            for i, chunk in enumerate(chunks):
-                if 'embedding' in chunk:
-                    similarity = self._cosine_similarity(query_embedding, chunk['embedding'])
-                    similarities.append((i, similarity))
+            for idx, doc_embedding in enumerate(doc_embeddings):
+                similarity = self.calculate_similarity(query_embedding, doc_embedding)
+                result = documents[idx].copy()
+                result['similarity_score'] = similarity
+                similarities.append(result)
             
             # Sort by similarity
-            similarities.sort(key=lambda x: x[1], reverse=True)
+            similarities.sort(key=lambda x: x['similarity_score'], reverse=True)
             
-            # Return top results
-            results = []
-            for i, (chunk_idx, similarity) in enumerate(similarities[:top_k]):
-                result = {
-                    **chunks[chunk_idx],
-                    'similarity_score': similarity,
-                    'search_rank': i + 1
-                }
-                results.append(result)
-            
-            return results
+            return similarities[:top_k]
             
         except Exception as e:
             self.logger.error(f"Error in semantic search: {str(e)}")
             return []
     
-    def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
-        """Calculate cosine similarity between two vectors."""
-        vec1_np = np.array(vec1)
-        vec2_np = np.array(vec2)
-        
-        dot_product = np.dot(vec1_np, vec2_np)
-        norm_a = np.linalg.norm(vec1_np)
-        norm_b = np.linalg.norm(vec2_np)
-        
-        if norm_a == 0 or norm_b == 0:
-            return 0
-        
-        return dot_product / (norm_a * norm_b)
-    
-    def save_embeddings(self, embeddings: Dict[str, Any], filepath: str):
+    def save_embeddings(self, embeddings: np.ndarray, file_path: str):
         """Save embeddings to file."""
         try:
-            with open(filepath, 'wb') as f:
-                pickle.dump(embeddings, f)
-            self.logger.info(f"Embeddings saved to {filepath}")
+            with open(file_path, 'wb') as f:
+                pickle.dump({
+                    'embeddings': embeddings,
+                    'vectorizer': self.vectorizer
+                }, f)
+            self.logger.info(f"Embeddings saved to {file_path}")
         except Exception as e:
             self.logger.error(f"Error saving embeddings: {str(e)}")
-            raise
     
-    def load_embeddings(self, filepath: str) -> Dict[str, Any]:
+    def load_embeddings(self, file_path: str) -> np.ndarray:
         """Load embeddings from file."""
         try:
-            with open(filepath, 'rb') as f:
-                embeddings = pickle.load(f)
-            self.logger.info(f"Embeddings loaded from {filepath}")
-            return embeddings
+            if os.path.exists(file_path):
+                with open(file_path, 'rb') as f:
+                    data = pickle.load(f)
+                    self.vectorizer = data['vectorizer']
+                    self.fitted = True
+                    self.logger.info(f"Embeddings loaded from {file_path}")
+                    return data['embeddings']
+            else:
+                self.logger.warning(f"Embeddings file not found: {file_path}")
+                return np.array([])
         except Exception as e:
             self.logger.error(f"Error loading embeddings: {str(e)}")
-            raise
+            return np.array([])
     
-    def cluster_embeddings(self, embeddings: List[List[float]], n_clusters: int = 5) -> List[int]:
-        """Cluster embeddings using K-means."""
+    def batch_process_chunks(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Process chunks in batches to generate embeddings."""
         try:
-            from sklearn.cluster import KMeans
+            texts = [chunk.get('content', '') for chunk in chunks]
+            embeddings = self.generate_embeddings(texts)
             
-            embeddings_np = np.array(embeddings)
-            kmeans = KMeans(n_clusters=n_clusters, random_state=42)
-            clusters = kmeans.fit_predict(embeddings_np)
+            # Add embeddings to chunks
+            for i, chunk in enumerate(chunks):
+                chunk['embedding'] = embeddings[i].tolist()  # Convert to list for JSON serialization
             
-            return clusters.tolist()
-        except ImportError:
-            self.logger.warning("scikit-learn not available for clustering")
-            return [0] * len(embeddings)
+            return chunks
+            
         except Exception as e:
-            self.logger.error(f"Error clustering embeddings: {str(e)}")
-            return [0] * len(embeddings)
-    
-    def find_similar_chunks(self, target_chunk: Dict[str, Any], all_chunks: List[Dict[str, Any]], 
-                           threshold: float = 0.8) -> List[Dict[str, Any]]:
-        """Find chunks similar to a target chunk."""
-        if 'embedding' not in target_chunk:
-            return []
-        
-        target_embedding = target_chunk['embedding']
-        similar_chunks = []
-        
-        for chunk in all_chunks:
-            if 'embedding' in chunk and chunk['chunk_id'] != target_chunk['chunk_id']:
-                similarity = self._cosine_similarity(target_embedding, chunk['embedding'])
-                if similarity >= threshold:
-                    similar_chunks.append({
-                        **chunk,
-                        'similarity_score': similarity
-                    })
-        
-        # Sort by similarity
-        similar_chunks.sort(key=lambda x: x['similarity_score'], reverse=True)
-        
-        return similar_chunks
+            self.logger.error(f"Error in batch processing chunks: {str(e)}")
+            return chunks
