@@ -1,0 +1,200 @@
+# Clinical IRT Study Design to Neo4j Graph Converter
+
+## Project Overview
+Create an enterprise-grade application that converts Clinical IRT Study Design PDF documents into Neo4j knowledge graphs with intelligent chunking, semantic search capabilities, and comprehensive document management.
+
+## Tech Stack
+- **Backend**: Python
+- **Database**: Neo4j (dual database setup - master graph db + metadata db)
+- **Frontend**: Streamlit
+- **LLM Framework**: Langchain + Langgraph
+- **Document Processing**: PyPDF2/pdfplumber for PDF parsing
+- **Embeddings**: OpenAI/Sentence-transformers for semantic search
+
+## Core Requirements
+
+### 1. PDF Document Processing Engine
+```python
+# Implement robust PDF parser that handles:
+- Complex layouts with lists, bullets, tables
+- Multi-column text extraction
+- Table structure preservation
+- Image/diagram extraction (if applicable)
+- Metadata extraction (title, author, creation date)
+
+# Document chunking strategy:
+- Semantic chunking (paragraph-aware)
+- Preserve table integrity
+- Maintain bullet point relationships
+- Add overlap between chunks for context
+- Calculate processing costs per chunk
+```
+
+### 2. Graph Database Architecture
+```cypher
+// Master Graph Database Schema:
+(:Document {name, upload_date, file_path, total_chunks, processing_status})
+  -[:CONTAINS]-> (:Chunk {content, chunk_id, page_number, paragraph_number, embedding})
+    -[:EXTRACTED_FROM]-> (:Triple {subject, predicate, object, confidence_score})
+    -[:REFERENCES]-> (:Citation {page_number, paragraph_number, line_number})
+
+// Metadata Database Schema:
+(:Upload {document_name, upload_timestamp, total_chunks, tokens_used, status})
+(:Statistics {total_documents, total_chunks_processed, total_tokens_used, last_updated})
+```
+
+### 3. LLM Integration & Triple Generation
+```python
+# Implement Langgraph workflow:
+1. Document ingestion → Chunking → Embedding generation
+2. Triple extraction using LLM prompts optimized for clinical documents
+3. Entity recognition and relationship mapping
+4. Confidence scoring for extracted triples
+5. Semantic similarity calculation for chunk relationships
+
+# Clinical-specific prompts:
+- Extract medical entities (procedures, medications, conditions)
+- Identify study phases, timelines, protocols
+- Map regulatory requirements and compliance points
+- Capture investigator roles and responsibilities
+```
+
+### 4. Streamlit UI Components
+
+#### Main Upload Interface
+```python
+# Features to implement:
+- Drag-and-drop PDF upload
+- File validation (PDF only, size limits)
+- Real-time progress bar showing:
+  * Current chunk being processed
+  * Percentage completion (processed_chunks / total_chunks)
+  * Estimated time remaining
+  * Cost calculation display
+- Upload confirmation with document preview
+```
+
+#### Admin Dashboard
+```python
+# Top Statistics Cards (inline layout):
+col1, col2, col3, col4 = st.columns(4)
+with col1:
+    st.metric("Total Documents", total_docs)
+with col2:
+    st.metric("Total Chunks", total_chunks)
+with col3:
+    st.metric("Tokens Used", total_tokens)
+with col4:
+    st.metric("Processing Status", active_jobs)
+
+# Document Cards Grid:
+- Display all uploads as cards
+- Show: filename, upload date, chunk count, processing status
+- Action buttons: Delete, Extend (placeholder)
+- Metadata: file size, processing time, token cost
+```
+
+### 5. Advanced Features Implementation
+
+#### Semantic Search Engine
+```python
+# Implement vector similarity search:
+- Store embeddings as node properties in Neo4j
+- Create search interface with natural language queries
+- Return results with source citations (page, paragraph)
+- Highlight relevant chunks in context
+- Provide confidence scores for search results
+```
+
+#### Citation & Reference System
+```python
+# Citation tracking:
+- Store exact page numbers and paragraph locations
+- Maintain line-level references for precise citation
+- Create citation export functionality
+- Link citations back to original document sections
+```
+
+#### Data Management
+```python
+# Deletion functionality:
+- Cascade delete: parent document → all chunks → all triples
+- Maintain referential integrity
+- Cleanup orphaned embeddings
+- Update statistics after deletion
+- Confirmation dialog with impact summary
+```
+
+## Technical Implementation Details
+
+### Error Handling & Validation
+```python
+# Robust error handling for:
+- Corrupted PDF files
+- Network timeouts during LLM calls
+- Neo4j connection failures
+- Memory management for large documents
+- Partial upload recovery
+```
+
+### Performance Optimization
+```python
+# Optimization strategies:
+- Batch processing for LLM calls
+- Async processing for large documents
+- Connection pooling for Neo4j
+- Caching for repeated queries
+- Progress checkpointing for resumable uploads
+```
+
+### Security & Compliance
+```python
+# Clinical application security:
+- Input sanitization for all user inputs
+- Secure file upload handling
+- Data encryption at rest and in transit
+- Audit logging for all operations
+- HIPAA compliance considerations
+```
+
+## File Structure
+```
+clinical_irt_converter/
+├── app.py                 # Main Streamlit application
+├── core/
+│   ├── document_processor.py  # PDF parsing and chunking
+│   ├── graph_manager.py       # Neo4j operations
+│   ├── llm_processor.py       # Langchain/Langgraph workflows
+│   └── embedding_manager.py   # Vector operations
+├── ui/
+│   ├── upload_interface.py    # Upload UI components
+│   ├── admin_dashboard.py     # Admin interface
+│   └── search_interface.py    # Search functionality
+├── config/
+│   ├── neo4j_config.py       # Database configuration
+│   └── llm_config.py         # LLM settings
+├── utils/
+│   ├── cost_calculator.py    # Token cost calculation
+│   └── progress_tracker.py   # Progress monitoring
+└── requirements.txt
+```
+
+## Key Implementation Focus Areas
+
+1. **Clinical Document Understanding**: Optimize parsing for medical terminology, study protocols, and regulatory language
+2. **Precise Retrieval**: Design graph structure for accurate clinical information retrieval
+3. **Cost Management**: Implement token usage tracking and cost optimization
+4. **User Experience**: Create intuitive interfaces for clinical research professionals
+5. **Data Integrity**: Ensure accurate citation tracking and reference management
+6. **Scalability**: Design for handling multiple large clinical documents
+7. **Compliance**: Build with clinical data handling best practices
+
+## Success Metrics
+- Accurate extraction of clinical entities and relationships
+- Fast retrieval with precise citations
+- Intuitive user interface for clinical researchers
+- Robust error handling and recovery
+- Efficient cost management for LLM operations
+- Scalable architecture for enterprise deployment
+
+Please implement this as a production-ready application with comprehensive testing, documentation, and deployment guidelines.
