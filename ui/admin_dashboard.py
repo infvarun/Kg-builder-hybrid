@@ -68,6 +68,7 @@ class AdminDashboard:
                     col4a, col4b = st.columns(2)
                     with col4a:
                         if st.button("🔍", key=f"view_{doc['name']}", help="View Details"):
+                            st.session_state[f"show_modal_{doc['name']}"] = True
                             self._show_document_details(doc)
                     with col4b:
                         if st.button("🗑️", key=f"delete_{doc['name']}", help="Delete Document"):
@@ -88,35 +89,150 @@ class AdminDashboard:
                 self._cleanup_database()
     
     def _show_document_details(self, document: Dict[str, Any]):
-        """Show detailed information about a document."""
-        st.subheader(f"📄 Document Details: {document['name']}")
+        """Show detailed information about a document in a modal dialog."""
+        # Initialize modal state
+        if f"show_modal_{document['name']}" not in st.session_state:
+            st.session_state[f"show_modal_{document['name']}"] = True
         
-        # Basic information
-        col1, col2 = st.columns(2)
-        with col1:
-            st.write("**Upload Date:**", document['upload_date'])
-            st.write("**Status:**", document['status'])
-            st.write("**Total Chunks:**", document['total_chunks'])
+        # Modal dialog using st.dialog
+        @st.dialog(f"📄 Document Details: {document['name']}", width="large")
+        def document_modal():
+            # Document header with key metrics
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("📊 Total Chunks", document['total_chunks'])
+            with col2:
+                st.metric("✅ Actual Chunks", document['actual_chunks'])
+            with col3:
+                metadata = document.get('metadata', {})
+                st.metric("📖 Pages", metadata.get('num_pages', 'N/A'))
+            with col4:
+                st.metric("📅 Upload Date", document['upload_date'])
+            
+            st.divider()
+            
+            # Status and basic info
+            col1, col2 = st.columns(2)
+            with col1:
+                status_color = "🟢" if document['status'] == 'completed' else "🟡"
+                st.markdown(f"**Status:** {status_color} {document['status'].title()}")
+                
+                if metadata.get('title'):
+                    st.markdown(f"**Title:** {metadata['title']}")
+                
+                if metadata.get('author'):
+                    st.markdown(f"**Author:** {metadata['author']}")
+            
+            with col2:
+                if metadata.get('creation_date'):
+                    st.markdown(f"**Created:** {metadata['creation_date']}")
+                
+                if metadata.get('file_size'):
+                    file_size_mb = metadata['file_size'] / (1024 * 1024)
+                    st.markdown(f"**File Size:** {file_size_mb:.1f} MB")
+                
+                if metadata.get('format'):
+                    st.markdown(f"**Format:** {metadata['format']}")
+            
+            # Full metadata in expandable section
+            if document.get('metadata'):
+                with st.expander("🔍 Complete Metadata", expanded=False):
+                    metadata_items = []
+                    for k, v in document['metadata'].items():
+                        metadata_items.append({
+                            'Property': k.replace('_', ' ').title(), 
+                            'Value': str(v)
+                        })
+                    
+                    if metadata_items:
+                        metadata_df = pd.DataFrame(metadata_items)
+                        st.dataframe(
+                            metadata_df, 
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config={
+                                "Property": st.column_config.TextColumn("Property", width="medium"),
+                                "Value": st.column_config.TextColumn("Value", width="large")
+                            }
+                        )
+            
+            # Processing information
+            st.subheader("⚙️ Processing Information")
+            
+            processing_col1, processing_col2 = st.columns(2)
+            with processing_col1:
+                chunk_efficiency = (document['actual_chunks'] / document['total_chunks'] * 100) if document['total_chunks'] > 0 else 0
+                st.metric("📈 Chunk Efficiency", f"{chunk_efficiency:.1f}%")
+                
+                if metadata.get('processing_time'):
+                    st.metric("⏱️ Processing Time", f"{metadata['processing_time']:.1f}s")
+            
+            with processing_col2:
+                if metadata.get('embeddings_generated'):
+                    st.metric("🧠 Embeddings", "✅ Generated" if metadata['embeddings_generated'] else "❌ Not Generated")
+                
+                if metadata.get('entities_extracted'):
+                    st.metric("🏷️ Entities", "✅ Extracted" if metadata['entities_extracted'] else "❌ Not Extracted")
+            
+            # Chunk preview
+            st.subheader("📄 Chunk Preview")
+            try:
+                # Get sample chunks for this document
+                sample_chunks = self.graph_manager.get_document_chunks(document['name'], limit=3)
+                
+                if sample_chunks:
+                    for i, chunk in enumerate(sample_chunks):
+                        with st.expander(f"Sample Chunk {i+1} - Page {chunk.get('page_number', 'N/A')}", expanded=i == 0):
+                            chunk_col1, chunk_col2, chunk_col3 = st.columns(3)
+                            with chunk_col1:
+                                st.caption(f"Type: {chunk.get('chunk_type', 'N/A')}")
+                            with chunk_col2:
+                                st.caption(f"Words: {chunk.get('word_count', 'N/A')}")
+                            with chunk_col3:
+                                st.caption(f"Characters: {chunk.get('char_count', 'N/A')}")
+                            
+                            content = chunk.get('content', '')
+                            preview = content[:500] + "..." if len(content) > 500 else content
+                            st.text_area(
+                                "Content Preview",
+                                preview,
+                                height=120,
+                                key=f"chunk_preview_{i}",
+                                disabled=True
+                            )
+                else:
+                    st.info("No chunk data available for preview.")
+            except Exception as e:
+                st.warning(f"Could not load chunk preview: {str(e)}")
+            
+            # Action buttons
+            st.divider()
+            action_col1, action_col2, action_col3 = st.columns(3)
+            
+            with action_col1:
+                if st.button("🔄 Reprocess Document", type="secondary", use_container_width=True):
+                    st.info("Document reprocessing would be implemented here.")
+            
+            with action_col2:
+                if st.button("📊 View Analytics", type="secondary", use_container_width=True):
+                    st.info("Document analytics would be displayed here.")
+            
+            with action_col3:
+                if st.button("❌ Delete Document", type="secondary", use_container_width=True):
+                    if st.checkbox("Confirm deletion", key="delete_confirm_modal"):
+                        try:
+                            success = self.graph_manager.delete_document(document['name'])
+                            if success:
+                                st.success("Document deleted successfully!")
+                                st.rerun()
+                            else:
+                                st.error("Failed to delete document")
+                        except Exception as e:
+                            st.error(f"Error deleting document: {str(e)}")
         
-        with col2:
-            st.write("**Actual Chunks:**", document['actual_chunks'])
-            metadata = document.get('metadata', {})
-            st.write("**Pages:**", metadata.get('num_pages', 'N/A'))
-            st.write("**Title:**", metadata.get('title', 'N/A'))
-        
-        # Metadata
-        if document.get('metadata'):
-            st.subheader("📋 Document Metadata")
-            metadata_df = pd.DataFrame([
-                {'Property': k, 'Value': str(v)} 
-                for k, v in document['metadata'].items()
-            ])
-            st.dataframe(metadata_df, use_container_width=True)
-        
-        # Chunks information
-        st.subheader("📄 Chunks Information")
-        # This would require additional query to get chunk details
-        st.info("Chunk details would be displayed here with additional database queries.")
+        # Show the modal
+        if st.session_state[f"show_modal_{document['name']}"]:
+            document_modal()
     
     def _delete_document(self, document_name: str):
         """Delete a document with confirmation."""
